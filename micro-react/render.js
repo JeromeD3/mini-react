@@ -47,22 +47,36 @@ function commitRoot() {
   currentRoot = wipRoot
   wipRoot = null
 }
+
 function commitWork(fiber) {
   if (!fiber) {
     return
   }
-  const domParent = fiber.parent.dom
+  // 对于函数式组件，他没有自己的dom，所以要找到他的父级dom
+  let domParentFiber = fiber.parent
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent
+  }
 
+  const domParent = domParentFiber.dom
   if (fiber.effectTag === 'PLACEMENT' && fiber.dom != null) {
     domParent.appendChild(fiber.dom)
   } else if (fiber.effectTag === 'DELETION') {
-    domParent.removeChild(fiber.dom)
+    commitDeletion(fiber, domParent)
   } else if (fiber.effectTag === 'UPDATE' && fiber.dom != null) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props)
   }
 
   commitWork(fiber.child)
   commitWork(fiber.sibiling)
+}
+
+function commitDeletion(fiber, domParent) {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom)
+  } else {
+    commitDeletion(fiber.child, domParent)
+  }
 }
 
 function updateDom(dom, prevProps, nextProps) {
@@ -106,6 +120,7 @@ function updateDom(dom, prevProps, nextProps) {
       dom.addEventListener(eventType, nextProps[name])
     })
 }
+
 // 调度函数
 function workLoop(deadLine) {
   // 是否停止
@@ -134,13 +149,13 @@ requestIdleCallback(workLoop)
 
 // 执行任务
 function performUnitOfWork(fiber) {
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber)
-  }
-  const elements = fiber.props.children
+  const isFunctionComponent = fiber.type instanceof Function
 
-  // diff 算法，创建、删除、更新fiber
-  reconcileChildren(fiber, elements)
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber)
+  } else {
+    updateHostComponent(fiber)
+  }
 
   // 返回下一个任务
   // 如果有孩子，就返回孩子
@@ -156,6 +171,23 @@ function performUnitOfWork(fiber) {
     // 没有兄弟，返回父亲的兄弟
     nextFiber = nextFiber.parent
   }
+}
+
+// 处理非函数组件
+function updateHostComponent(fiber) {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber)
+  }
+  const elements = fiber.props.children
+  // diff 算法，创建、删除、更新fiber
+  reconcileChildren(fiber, elements)
+}
+
+// 处理函数组件
+function updateFunctionComponent(fiber) {
+  const children = [fiber.type(fiber.props)]
+
+  reconcileChildren(fiber, children)
 }
 
 // diff算法
