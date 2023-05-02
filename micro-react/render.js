@@ -8,13 +8,11 @@ function createDom(fiber) {
   Object.keys(fiber.props)
     .filter(isProperty)
     .forEach((name) => {
-      dom[name] = fiber.props[name]
-
-      // if (fiber.type === 'TEXT_ELEMENT') {
-      //   dom[name] = fiber.props[name]
-      // } else {
-      //   dom.setAttribute(name, fiber.props[name])
-      // }
+      if (name === 'class') {
+        dom.setAttribute(name, fiber.props[name])
+      } else {
+        dom[name] = fiber.props[name]
+      }
     })
   return dom
 }

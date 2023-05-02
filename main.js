@@ -8,7 +8,7 @@ const renderer = (value) => {
   const container = document.querySelector('#root')
 
   const element = 
-  createElement('div', null,
+  createElement('div', { class:'container'},
   createElement('input', { oninput: (e) => handleInput(e) }, null),
   createElement('h1', null, value)
   )
