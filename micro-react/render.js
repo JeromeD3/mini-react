@@ -1,23 +1,26 @@
+const isProperty = (key) => key !== 'children'
+
 function createDom(fiber) {
   // 创建元素节点
   const dom = fiber.type === 'TEXT_ELEMENT' ? document.createTextNode(fiber.props.nodeValue) : document.createElement(fiber.type)
-
   // 添加属性
-  const isProperty = (key) => key !== 'children'
 
   Object.keys(fiber.props)
     .filter(isProperty)
     .forEach((name) => {
-      if (fiber.type === 'TEXT_ELEMENT') {
-        dom[name] = fiber.props[name]
-      } else {
-        dom.setAttribute(name, fiber.props[name])
-      }
+      dom[name] = fiber.props[name]
+
+      // if (fiber.type === 'TEXT_ELEMENT') {
+      //   dom[name] = fiber.props[name]
+      // } else {
+      //   dom.setAttribute(name, fiber.props[name])
+      // }
     })
   return dom
 }
 
 function render(element, container) {
+  deletions = []
   // 主要作用是创建第一个fiber
   wipRoot = {
     dom: container,
@@ -27,17 +30,23 @@ function render(element, container) {
     sibiling: null,
     child: null,
     parent: null,
+    alternate: currentRoot, // 上一个fiber
   }
   nextUnitOfWork = wipRoot
 }
 
 // 下一个工作的任务
 let nextUnitOfWork = null
-
+//  用于判断是否渲染完成
 let wipRoot = null
+let currentRoot = null
+let deletions = null // 删除的fiber
 
 function commitRoot() {
+  deletions.forEach(commitWork)
   commitWork(wipRoot.child)
+
+  currentRoot = wipRoot
   wipRoot = null
 }
 function commitWork(fiber) {
@@ -45,9 +54,59 @@ function commitWork(fiber) {
     return
   }
   const domParent = fiber.parent.dom
-  domParent.appendChild(fiber.dom)
+
+  if (fiber.effectTag === 'PLACEMENT' && fiber.dom != null) {
+    domParent.appendChild(fiber.dom)
+  } else if (fiber.effectTag === 'DELETION') {
+    domParent.removeChild(fiber.dom)
+  } else if (fiber.effectTag === 'UPDATE' && fiber.dom != null) {
+    updateDom(fiber.dom, fiber.alternate.props, fiber.props)
+  }
+
   commitWork(fiber.child)
   commitWork(fiber.sibiling)
+}
+
+function updateDom(dom, prevProps, nextProps) {
+  const isNew = (key) => prevProps[key] !== nextProps[key]
+
+  const isGone = (key) => !(key in nextProps)
+  const isExist = (key) => !(key in prevProps)
+  const isEvent = (key) => key.startsWith('on')
+
+  // 删除旧的属性
+  Object.keys(prevProps)
+    .filter((key) => isProperty(key) && !isEvent(key))
+    .filter(isGone)
+    .forEach((key) => {
+      dom[key] = ''
+    })
+
+  // 添加新的属性
+  Object.keys(nextProps)
+    .filter((key) => isProperty(key) && !isEvent(key))
+    .filter((key) => isExist(key) || isNew(key))
+    .forEach((key) => {
+      dom[key] = nextProps[key]
+    })
+
+  // 删除已经没有的事件处理函数
+  Object.keys(prevProps)
+    .filter(isEvent)
+    .filter((key) => isGone(key) || isNew(key))
+    .forEach((name) => {
+      const eventType = name.toLowerCase().substring(2)
+      dom.removeEventListener(eventType, prevProps[name])
+    })
+
+  // 添加新的事件处理函数
+  Object.keys(nextProps)
+    .filter(isEvent)
+    .filter(isNew)
+    .forEach((name) => {
+      const eventType = name.toLowerCase().substring(2)
+      dom.addEventListener(eventType, nextProps[name])
+    })
 }
 // 调度函数
 function workLoop(deadLine) {
@@ -66,7 +125,7 @@ function workLoop(deadLine) {
   // 告诉浏览器，空闲的时候，再次调用
   // 异步函数，不会阻塞主线程
   requestIdleCallback(workLoop)
-  
+
   // Commit 阶段 -> 实现异步渲染，同步提交
   if (!nextUnitOfWork && wipRoot) {
     commitRoot()
@@ -80,41 +139,10 @@ function performUnitOfWork(fiber) {
   if (!fiber.dom) {
     fiber.dom = createDom(fiber)
   }
+  const elements = fiber.props.children
 
-  // 给children 新建fiber
-  const filber = createNewFiber(fiber)
-
-  return filber
-}
-
-function createNewFiber(fiber) {
-  const element = fiber.props.children
-
-  let prevSibling = null
-
-  // 建立fiber之间的联系，构建Fiber Tree
-  for (let i = 0; i < element.length; i++) {
-    const newFiber = {
-      type: element[i].type,
-      props: element[i].props,
-      parent: fiber,
-      dom: null, // 孩子一开始是没有dom的，只有根元素才有，所以执行任务一开始就要创建dom
-      child: null,
-      sibiling: null,
-    }
-
-    // 如果是第一个，
-    if (i === 0) {
-      // 你就是儿子
-      fiber.child = newFiber
-    } else {
-      // 你就是兄弟
-      prevSibling.sibiling = newFiber
-    }
-
-    // 原来的儿子变成兄弟
-    prevSibling = newFiber
-  }
+  // diff 算法，创建、删除、更新fiber
+  reconcileChildren(fiber, elements)
 
   // 返回下一个任务
   // 如果有孩子，就返回孩子
@@ -132,31 +160,69 @@ function createNewFiber(fiber) {
   }
 }
 
+// diff算法
+function reconcileChildren(wipFiber, elements) {
+  let index = 0
+  // 如果有上一次的fiber，返回他的child
+  let oldFiber = wipFiber.alternate && wipFiber.alternate.child
+  // 存放兄弟，用于构建链表
+  let prevSibling = null
+
+  while (index < elements.length || oldFiber != null) {
+    const element = elements[index]
+    const sameType = oldFiber && element && element.type === oldFiber.type
+
+    let newFiber = null // 新的fiber
+
+    if (sameType) {
+      // 更新 , 复用节点, 只更新属性
+      newFiber = {
+        type: oldFiber.type,
+        props: element.props,
+        dom: oldFiber.dom,
+        parent: wipFiber,
+        alternate: oldFiber,
+        effectTag: 'UPDATE',
+      }
+    }
+
+    if (element && !sameType) {
+      // 添加
+      newFiber = {
+        type: element.type,
+        props: element.props,
+        dom: null,
+        parent: wipFiber,
+        alternate: null, // 因为是新建的，所以没有老节点
+        effectTag: 'PLACEMENT',
+      }
+    }
+
+    if (oldFiber && !sameType) {
+      // 删除
+      oldFiber.effectTag = 'DELETION'
+      deletions.push(oldFiber)
+    }
+
+    if (oldFiber) {
+      //获取兄弟
+      oldFiber = oldFiber.sibiling
+    }
+
+    // 如果是第一个，
+    if (index === 0) {
+      // 你就是儿子
+      wipFiber.child = newFiber
+    } else {
+      // 你就是兄弟
+      prevSibling.sibiling = newFiber
+    }
+
+    // 原来的儿子变成兄弟
+    prevSibling = newFiber
+
+    index++
+  }
+}
+
 export default render
-
-// 这里有问题，如果递🐢任务太多，会阻塞主线程
-// function render(element, container) {
-//   // 创建元素节点
-//   const dom = element.type === 'TEXT_ELEMENT' ? document.createTextNode(element.props.nodeValue) : document.createElement(element.type)
-
-//   // 如果还有子元素 ，继续递🐢
-//   if (element.props.children) {
-//     element.props.children.forEach((child) => render(child, dom))
-//   }
-
-//   // 添加属性
-//   const isProperty = (key) => key !== 'children'
-
-//   Object.keys(element.props)
-//     .filter(isProperty)
-//     .forEach((name) => {
-//       if (element.type === 'TEXT_ELEMENT') {
-//         dom[name] = element.props[name]
-//       } else {
-//         dom.setAttribute(name, element.props[name])
-//       }
-//     })
-
-//   // 追加到父容器中
-//   container.append(dom)
-// }
