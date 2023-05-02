@@ -1,5 +1,5 @@
 import { createElement, render } from './micro-react'
-
+import { useState } from './micro-react/render'
 // const handleInput = (e) => {
 //   renderer(e.target.value)
 // }
@@ -18,10 +18,23 @@ import { createElement, render } from './micro-react'
 
 // renderer('hello')
 
-const App = (props) => {
-  return createElement('h1', { class: 'container' }, props.name)
-}
+// ====================================
+
+// const App = (props) => {
+//   return createElement('h1', { class: 'container' }, props.name)
+// }
+
+// const container = document.querySelector('#root')
+// const element = createElement(App, { name: 'dxb' })
+// render(element, container)
+
+// ====================================
 
 const container = document.querySelector('#root')
-const element = createElement(App, { name: 'dxb' })
+const Count = () => {
+  const [state, setState] = useState(0)
+  return createElement('button', { onclick: () => setState((pre) => pre + 1) }, state)
+}
+
+const element = createElement(Count)
 render(element, container)

@@ -37,7 +37,7 @@ function render(element, container) {
 let nextUnitOfWork = null
 //  用于判断是否渲染完成
 let wipRoot = null
-let currentRoot = null
+let currentRoot = null //保存整个fiber树
 let deletions = null // 删除的fiber
 
 function commitRoot() {
@@ -183,8 +183,16 @@ function updateHostComponent(fiber) {
   reconcileChildren(fiber, elements)
 }
 
+// 记录上一次的fiber
+let wipFiber = null
+let hookIndex = null
+
 // 处理函数组件
 function updateFunctionComponent(fiber) {
+  wipFiber = fiber
+  hookIndex = 0
+  wipFiber.hooks = []
+
   const children = [fiber.type(fiber.props)]
 
   reconcileChildren(fiber, children)
@@ -253,6 +261,38 @@ function reconcileChildren(wipFiber, elements) {
 
     index++
   }
+}
+
+// hook
+export function useState(init) {
+  console.log(wipFiber)
+  // 这里的hook主要是保存之前的状态
+  const oldHook = wipFiber.alternate && wipFiber.alternate.hooks && wipFiber.alternate.hooks[hookIndex]
+  console.log(oldHook)
+  const hook = {
+    state: oldHook ? oldHook.state : init,
+    queue: [],
+  }
+
+  const action = oldHook ? oldHook.queue : []
+  action.forEach((action) => {
+    hook.state = action(hook.state)
+  })
+
+  const setState = (action) => {
+    hook.queue.push(action)
+    wipRoot = {
+      dom: currentRoot.dom,
+      props: currentRoot.props,
+      alternate: currentRoot,
+    }
+    nextUnitOfWork = wipRoot
+    deletions = []
+  }
+  wipFiber.hooks.push(hook)
+
+  hookIndex++
+  return [hook.state, setState]
 }
 
 export default render
